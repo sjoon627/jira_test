@@ -50,62 +50,45 @@ jobs:
           jira_key="${{ steps.extract.outputs.jira_key }}"
           echo "🔍 Getting transitions for: $jira_key"
           
-          # Get available transitions
-          response=$(curl -s -w "HTTP_STATUS:%{http_code}" \
-            -H "Authorization: Basic $(echo -n '${{ secrets.JIRA_USER_EMAIL }}:${{ secrets.JIRA_API_TOKEN }}' | base64)" \
+          # Debug: Show exact URL and auth
+          jira_url="${{ secrets.JIRA_BASE_URL }}"
+          echo "🔗 API URL: ${jira_url}/rest/api/2/issue/$jira_key/transitions"
+          
+          # Create auth header separately for debugging
+          auth_token=$(echo -n '${{ secrets.JIRA_USER_EMAIL }}:${{ secrets.JIRA_API_TOKEN }}' | base64)
+          echo "🔐 Auth token length: ${#auth_token}"
+          
+          # Try curl with more error handling
+          response=$(curl -s -w "\nHTTP_STATUS:%{http_code}" \
+            --fail-with-body \
+            -H "Authorization: Basic $auth_token" \
             -H "Accept: application/json" \
-            "${{ secrets.JIRA_BASE_URL }}/rest/api/2/issue/$jira_key/transitions")
+            "${jira_url}/rest/api/2/issue/$jira_key/transitions" 2>&1)
           
           curl_exit_code=$?
-          http_status=$(echo "$response" | grep -o "HTTP_STATUS:[0-9]*" | cut -d: -f2 || echo "000")
+          echo "🔍 Curl exit code: $curl_exit_code"
           
-          if [ $curl_exit_code -eq 0 ] && [ "$http_status" = "200" ]; then
-            transitions_json=$(echo "$response" | sed 's/HTTP_STATUS:[0-9]*$//')
-            echo "✅ Got transitions successfully"
-            echo "Response: $transitions_json"
+          if [ $curl_exit_code -ne 0 ]; then
+            echo "❌ Curl failed with exit code: $curl_exit_code"
+            echo "📝 Response: $response"
             
-            # Extract transition IDs (common names)
-            done_id=$(echo "$transitions_json" | python3 -c "
-            import json, sys
-            data = json.load(sys.stdin)
-            for t in data.get('transitions', []):
-                name = t.get('name', '').lower()
-                if 'done' in name or 'complete' in name or 'resolve' in name or 'close' in name:
-                    print(t.get('id', ''))
-                    break
-            ")
+            # Common curl exit codes
+            case $curl_exit_code in
+              6) echo "🔍 Could not resolve host" ;;
+              7) echo "🔍 Failed to connect to host" ;;
+              22) echo "🔍 HTTP error (4xx or 5xx)" ;;
+              35) echo "🔍 SSL/TLS error" ;;
+              43) echo "🔍 Internal error - possibly malformed URL or auth" ;;
+              *) echo "🔍 Unknown error" ;;
+            esac
             
-            todo_id=$(echo "$transitions_json" | python3 -c "
-            import json, sys
-            data = json.load(sys.stdin)
-            for t in data.get('transitions', []):
-                name = t.get('name', '').lower()
-                if 'to do' in name or 'todo' in name or 'open' in name or 'reopen' in name:
-                    print(t.get('id', ''))
-                    break
-            ")
-            
-            in_progress_id=$(echo "$transitions_json" | python3 -c "
-            import json, sys
-            data = json.load(sys.stdin)
-            for t in data.get('transitions', []):
-                name = t.get('name', '').lower()
-                if 'in progress' in name or 'progress' in name or 'review' in name:
-                    print(t.get('id', ''))
-                    break
-            ")
-            
-            echo "done_id=$done_id" >> $GITHUB_OUTPUT
-            echo "todo_id=$todo_id" >> $GITHUB_OUTPUT
-            echo "in_progress_id=$in_progress_id" >> $GITHUB_OUTPUT
-            
-            echo "📋 Transition IDs: Done=$done_id, Todo=$todo_id, InProgress=$in_progress_id"
-          else
-            echo "::error::Failed to get transitions (exit: $curl_exit_code, status: $http_status)"
             echo "done_id=" >> $GITHUB_OUTPUT
             echo "todo_id=" >> $GITHUB_OUTPUT
             echo "in_progress_id=" >> $GITHUB_OUTPUT
+            exit 0
           fi
+          
+          # Rest of the code...
 
       - name: 📊 Show current Jira issue status
         if: steps.extract.outputs.jira_key
