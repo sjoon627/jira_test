@@ -89,6 +89,17 @@ jobs:
           echo "$description" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
+      # Epic 필드 준비
+      - name: Prepare Fields
+        id: prep_fields
+        run: |
+          epic_key="${{ steps.parse.outputs.epic_number }}"
+          if [ -n "$epic_key" ] && [ "$epic_key" != "_No response_" ]; then
+            echo "fields={\"parent\":{\"key\":\"$epic_key\"}}" >> $GITHUB_OUTPUT
+          else
+            echo "fields={}" >> $GITHUB_OUTPUT
+          fi
+
       # Jira 이슈 생성
       - name: Create Jira Issue
         id: create_jira
@@ -98,7 +109,7 @@ jobs:
           issuetype: ${{ steps.parse.outputs.issue_type }}
           summary: ${{ github.event.issue.title }}
           description: ${{ steps.prep_description.outputs.description }}
-          fields: ${{ steps.parse.outputs.epic_number && format('{"parent":{"key":"{0}"}}', steps.parse.outputs.epic_number) || '{}' }}
+          fields: ${{ steps.prep_fields.outputs.fields }}
 
       # 생성된 Jira 키로 GitHub 이슈 제목 업데이트
       - name: Update GitHub Issue Title
