@@ -66,7 +66,17 @@ jobs:
 
           # HTTP 상태 코드와 함께 응답 받기
           echo "[DEBUG] Attempting to call Jira API..."
-          response=$(curl -s -w "HTTP_STATUS:%{http_code}" -X GET \
+          echo "[DEBUG] Target URL: ${{ secrets.JIRA_BASE_URL }}/rest/api/2/issue/${{ steps.extract.outputs.jira_key }}/transitions"
+          echo "[DEBUG] User Email: ${{ secrets.JIRA_USER_EMAIL }}"
+          
+          # DNS 해석 테스트
+          echo "[DEBUG] Testing DNS resolution..."
+          host_part=$(echo "${{ secrets.JIRA_BASE_URL }}" | sed 's|https://||' | sed 's|http://||' | cut -d'/' -f1)
+          echo "[DEBUG] Host to resolve: $host_part"
+          nslookup "$host_part" || echo "[WARNING] DNS resolution failed"
+          
+          # curl 실행
+          response=$(curl -v -s -w "HTTP_STATUS:%{http_code}" -X GET \
             -H "Authorization: Basic $(echo -n ${{ secrets.JIRA_USER_EMAIL }}:${{ secrets.JIRA_API_TOKEN }} | base64)" \
             -H "Content-Type: application/json" \
             --connect-timeout 30 \
