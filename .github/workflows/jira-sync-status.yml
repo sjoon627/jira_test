@@ -89,7 +89,11 @@ jobs:
       - name: Debug - Show Current Issue Status
         if: always() && steps.extract.outputs.jira_key
         run: |
+          jira_key="${{ steps.extract.outputs.jira_key }}"
+          jira_url="${{ secrets.JIRA_BASE_URL }}"
+          auth_header="Authorization: Basic $(echo -n ${{ secrets.JIRA_USER_EMAIL }}:${{ secrets.JIRA_API_TOKEN }} | base64)"
+
           curl -s -X GET \
-            -H "Authorization: Basic $(echo -n ${{ secrets.JIRA_USER_EMAIL }}:${{ secrets.JIRA_API_TOKEN }} | base64)" \
-            "${{ secrets.JIRA_BASE_URL }}/rest/api/2/issue/${{ steps.extract.outputs.jira_key }?fields=status" | \
+            -H "$auth_header" \
+            "$jira_url/rest/api/2/issue/$jira_key?fields=status" | \
             jq '.fields.status'
