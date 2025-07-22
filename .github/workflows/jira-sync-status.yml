@@ -22,9 +22,13 @@ jobs:
         run: |
           title="${{ github.event.issue.title || github.event.pull_request.title }}"
           echo "[DEBUG] Issue/PR Title: $title"
-          if [[ "$title" =~ \\[([A-Z]+-[0-9]+)\\] ]]; then
-            echo "[DEBUG] Extracted Jira Key: ${BASH_REMATCH[1]}"
-            echo "jira_key=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
+          
+          # Extract Jira key using grep and cut
+          jira_key=$(echo "$title" | grep -oE '\[[A-Z]+-[0-9]+\]' | sed 's/\[//;s/\]//')
+          
+          if [ -n "$jira_key" ]; then
+            echo "[DEBUG] Extracted Jira Key: $jira_key"
+            echo "jira_key=$jira_key" >> $GITHUB_OUTPUT
           else
             echo "[DEBUG] Jira Key not found in title"
             echo "jira_key=" >> $GITHUB_OUTPUT
