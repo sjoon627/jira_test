@@ -107,14 +107,7 @@ jobs:
 
           if [ $curl_exit_code -eq 0 ] && [ "$http_status" = "200" ]; then
             status_json=$(echo "$response" | sed 's/HTTP_STATUS:[0-9]*$//')
-            current_status=$(echo "$status_json" | python3 -c "
-            import json, sys
-            try:
-                data = json.load(sys.stdin)
-                print(data['fields']['status']['name'])
-            except:
-                print('Unknown')
-            ")
+            current_status=$(echo "$status_json" | python3 -c "import json, sys; try: data = json.load(sys.stdin); print(data['fields']['status']['name']) except: print('Unknown')")
             echo "📊 Current Jira status: $current_status"
           else
             echo "::warning::Could not get current status (exit: $curl_exit_code, status: $http_status)"
