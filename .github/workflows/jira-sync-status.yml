@@ -23,7 +23,7 @@ jobs:
           title="${{ github.event.issue.title || github.event.pull_request.title }}"
           echo "[DEBUG] Issue/PR Title: $title"
 
-          jira_key=$(echo "$title" | python3 -c "import re, sys; title = sys.stdin.read(); match = re.search(r'\[([A-Z]+-\d+)\]', title); print(match.group(1) if match else '')")
+          jira_key=$(echo "$title" | python3 -c "import re, sys; title = sys.stdin.read().strip(); match = re.search(r'\[([A-Z]+-\d+)\]', title); print(match.group(1) if match else '')")
 
           if [ -n "$jira_key" ]; then
             echo "[DEBUG] Extracted Jira Key: $jira_key"
