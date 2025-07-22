@@ -13,6 +13,15 @@ jobs:
   automation:
     runs-on: ubuntu-latest
     steps:
+      # [디버깅] 입력값 로그 출력
+      - name: Debug Issue Form Inputs
+        run: |
+          echo "issue_type: ${{ github.event.inputs.issue_type }}"
+          echo "epic_number: ${{ github.event.inputs.epic_number }}"
+          echo "issue_label: ${{ github.event.inputs.issue_label }}"
+          echo "branch_name: ${{ github.event.inputs.branch_name }}"
+          echo "issue_description: ${{ github.event.inputs.issue_description }}"
+          echo "task_list: ${{ github.event.inputs.task_list }}"
       # 1. Jira 로그인
       - name: Login to Jira
         uses: atlassian/gajira-login@v3
