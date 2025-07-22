@@ -51,13 +51,15 @@ jobs:
 
           json=$(echo "$response" | sed 's/HTTP_STATUS:[0-9]*$//')
 
-          done_id=$(echo "$json" | python3 -c "import json, sys, re; d=json.load(sys.stdin); print(next((t['id'] for t in d.get('transitions',[]) if re.search(r'Done|완료', t['name'], re.I)), ''))")
-          progress_id=$(echo "$json" | python3 -c "import json, sys, re; d=json.load(sys.stdin); print(next((t['id'] for t in d.get('transitions',[]) if re.search(r'In Progress|진행', t['name'], re.I)), ''))")
-          todo_id=$(echo "$json" | python3 -c "import json, sys, re; d=json.load(sys.stdin); print(next((t['id'] for t in d.get('transitions',[]) if re.search(r'To Do|할 일', t['name'], re.I)), ''))")
+          done_id=$(echo "$json" | python3 -c "import json, sys, re; d=json.load(sys.stdin); print(next((t['id'] for t in d.get('transitions',[]) if re.search(r'완료|Done', t['name'], re.I)), ''))")
+          progress_id=$(echo "$json" | python3 -c "import json, sys, re; d=json.load(sys.stdin); print(next((t['id'] for t in d.get('transitions',[]) if re.search(r'진행 중|In Progress', t['name'], re.I)), ''))")
+          todo_id=$(echo "$json" | python3 -c "import json, sys, re; d=json.load(sys.stdin); print(next((t['id'] for t in d.get('transitions',[]) if re.search(r'해야 할 일|To Do', t['name'], re.I)), ''))")
+          review_id=$(echo "$json" | python3 -c "import json, sys, re; d=json.load(sys.stdin); print(next((t['id'] for t in d.get('transitions',[]) if re.search(r'검토 중|Review', t['name'], re.I)), ''))")
 
           echo "done_id=$done_id" >> $GITHUB_OUTPUT
           echo "progress_id=$progress_id" >> $GITHUB_OUTPUT
           echo "todo_id=$todo_id" >> $GITHUB_OUTPUT
+          echo "review_id=$review_id" >> $GITHUB_OUTPUT
 
       - name: 📊 Update Jira status
         if: steps.extract.outputs.jira_key
@@ -79,12 +81,12 @@ jobs:
               "${{ secrets.JIRA_BASE_URL }}/rest/api/2/issue/$jira_key/transitions"
             echo "🔄 Issue reopened → To Do"
 
-          # PR opened → In Progress
-          elif [ "${{ github.event.action }}" = "opened" ] && [ "${{ github.event.pull_request }}" ] && [ -n "${{ steps.transitions.outputs.progress_id }}" ]; then
+          # PR opened → Review (검토 중)
+          elif [ "${{ github.event.action }}" = "opened" ] && [ "${{ github.event.pull_request }}" ] && [ -n "${{ steps.transitions.outputs.review_id }}" ]; then
             curl -s -X POST -H "$auth" -H "Content-Type: application/json" \
-              -d "{\"transition\":{\"id\":\"${{ steps.transitions.outputs.progress_id }}\"}}" \
+              -d "{\"transition\":{\"id\":\"${{ steps.transitions.outputs.review_id }}\"}}" \
               "${{ secrets.JIRA_BASE_URL }}/rest/api/2/issue/$jira_key/transitions"
-            echo "🚀 PR opened → In Progress"
+            echo "🔍 PR opened → Review (검토 중)"
 
           # PR merged → Done
           elif [ "${{ github.event.action }}" = "closed" ] && [ "${{ github.event.pull_request.merged }}" = "true" ] && [ -n "${{ steps.transitions.outputs.done_id }}" ]; then
