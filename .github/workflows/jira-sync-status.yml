@@ -58,29 +58,21 @@ jobs:
           auth_token=$(echo -n '${{ secrets.JIRA_USER_EMAIL }}:${{ secrets.JIRA_API_TOKEN }}' | base64 | tr -d '\n')
           echo "🔐 Auth token length: ${#auth_token}"
 
-          # Try curl with more error handling
+          # Try curl without --fail-with-body for compatibility
           response=$(curl -s -w "\nHTTP_STATUS:%{http_code}" \
-            --fail-with-body \
             -H "Authorization: Basic $auth_token" \
             -H "Accept: application/json" \
-            "${jira_url}/rest/api/2/issue/$jira_key/transitions" 2>&1)
+            "${jira_url}/rest/api/2/issue/$jira_key/transitions")
 
           curl_exit_code=$?
+          http_status=$(echo "$response" | grep -o "HTTP_STATUS:[0-9]*" | cut -d: -f2 || echo "000")
+          
           echo "🔍 Curl exit code: $curl_exit_code"
+          echo "🔍 HTTP status: $http_status"
 
           if [ $curl_exit_code -ne 0 ]; then
             echo "❌ Curl failed with exit code: $curl_exit_code"
             echo "📝 Response: $response"
-            
-            # Common curl exit codes
-            case $curl_exit_code in
-              6) echo "🔍 Could not resolve host" ;;
-              7) echo "🔍 Failed to connect to host" ;;
-              22) echo "🔍 HTTP error (4xx or 5xx)" ;;
-              35) echo "🔍 SSL/TLS error" ;;
-              43) echo "🔍 Internal error - possibly malformed URL or auth" ;;
-              *) echo "🔍 Unknown error" ;;
-            esac
             
             echo "done_id=" >> $GITHUB_OUTPUT
             echo "todo_id=" >> $GITHUB_OUTPUT
@@ -88,7 +80,32 @@ jobs:
             exit 0
           fi
 
-          # Rest of the code...
+          # Check HTTP status
+          if [ "$http_status" != "200" ]; then
+            echo "❌ HTTP error: $http_status"
+            echo "📝 Response body: $(echo "$response" | sed 's/HTTP_STATUS:[0-9]*$//')"
+            
+            echo "done_id=" >> $GITHUB_OUTPUT
+            echo "todo_id=" >> $GITHUB_OUTPUT
+            echo "in_progress_id=" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Parse JSON response
+          transitions_json=$(echo "$response" | sed 's/HTTP_STATUS:[0-9]*$//')
+          echo "📝 Available transitions:"
+          echo "$transitions_json" | python3 -c "import json, sys; data = json.loads(sys.stdin.read()); [print(f\"  - {t['id']}: {t['name']}\") for t in data.get('transitions', [])]"
+
+          # Extract transition IDs using Python (one-liner)
+          done_id=$(echo "$transitions_json" | python3 -c "import json, sys, re; data = json.loads(sys.stdin.read()); print(next((t['id'] for t in data.get('transitions', []) if re.search(r'Done|완료|Closed|종료', t['name'], re.I)), ''))")
+          in_progress_id=$(echo "$transitions_json" | python3 -c "import json, sys, re; data = json.loads(sys.stdin.read()); print(next((t['id'] for t in data.get('transitions', []) if re.search(r'In Progress|진행 중|진행중', t['name'], re.I)), ''))")
+          todo_id=$(echo "$transitions_json" | python3 -c "import json, sys, re; data = json.loads(sys.stdin.read()); print(next((t['id'] for t in data.get('transitions', []) if re.search(r'To Do|할 일|대기', t['name'], re.I)), ''))")
+
+          echo "🔍 Found transitions - Done: ${done_id:-N/A}, In Progress: ${in_progress_id:-N/A}, To Do: ${todo_id:-N/A}"
+
+          echo "done_id=$done_id" >> $GITHUB_OUTPUT
+          echo "in_progress_id=$in_progress_id" >> $GITHUB_OUTPUT
+          echo "todo_id=$todo_id" >> $GITHUB_OUTPUT
 
       - name: 📊 Show current Jira issue status
         if: steps.extract.outputs.jira_key
