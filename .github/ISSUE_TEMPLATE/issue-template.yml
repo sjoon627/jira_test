@@ -12,9 +12,11 @@ body:
       label: "이슈 유형"
       description: "생성할 Jira 이슈의 유형을 선택해주세요."
       options:
-        - 작업 # Jira에 실제 존재하는 이슈 유형 이름과 일치시켜야 합니다.
+        - 작업
         - 버그
         - 스토리
+        - 에픽
+        - 하위 작업
     validations:
       required: true
 
