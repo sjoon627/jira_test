@@ -154,8 +154,20 @@ jobs:
         run: |
           ISSUE_KEY="${{ steps.create_jira.outputs.issue }}"
           RAW_BRANCH_NAME="${{ steps.parse.outputs.branch_name }}"
-          # Jira 키를 브랜치명에 포함 (예: feat/[IDE-1]test)
-          BRANCH_NAME=$(echo "$RAW_BRANCH_NAME" | sed "s/\(feat\/\)\(.*\)/\1[$ISSUE_KEY]\2/")
+          # Jira 키를 브랜치명에 포함 (대괄호 대신 슬래시 사용: feat/TEST1-39/login)
+          if [[ "$RAW_BRANCH_NAME" == feat/* ]]; then
+            # feat/login -> feat/TEST1-39/login
+            BRANCH_NAME=$(echo "$RAW_BRANCH_NAME" | sed "s|feat/|feat/$ISSUE_KEY/|")
+          elif [[ "$RAW_BRANCH_NAME" == fix/* ]]; then
+            # fix/bug -> fix/TEST1-39/bug
+            BRANCH_NAME=$(echo "$RAW_BRANCH_NAME" | sed "s|fix/|fix/$ISSUE_KEY/|")
+          elif [[ "$RAW_BRANCH_NAME" == chore/* ]]; then
+            # chore/update -> chore/TEST1-39/update
+            BRANCH_NAME=$(echo "$RAW_BRANCH_NAME" | sed "s|chore/|chore/$ISSUE_KEY/|")
+          else
+            # 기본: 앞에 이슈 키 추가
+            BRANCH_NAME="${ISSUE_KEY}/${RAW_BRANCH_NAME}"
+          fi
           
           # Git 설정
           git config user.name "github-actions[bot]"
