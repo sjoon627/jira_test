@@ -4,7 +4,7 @@ on:
   issues:
     types: [closed, reopened]
   pull_request:
-    types: [opened, closed, merged]
+    types: [opened, closed]
 
 jobs:
   sync-status:
@@ -22,10 +22,9 @@ jobs:
         run: |
           title="${{ github.event.issue.title || github.event.pull_request.title }}"
           echo "[DEBUG] Issue/PR Title: $title"
-          
-          # Extract Jira key using grep and cut
-          jira_key=$(echo "$title" | grep -oE '\[[A-Z]+-[0-9]+\]' | sed 's/\[//;s/\]//')
-          
+
+          jira_key=$(python3 -c "import re; title = '''$title'''; match = re.search(r'\[([A-Z]+-\d+)\]', title); print(match.group(1) if match else '')")
+
           if [ -n "$jira_key" ]; then
             echo "[DEBUG] Extracted Jira Key: $jira_key"
             echo "jira_key=$jira_key" >> $GITHUB_OUTPUT
