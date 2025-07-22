@@ -51,16 +51,42 @@ jobs:
             echo "todo_id=" >> $GITHUB_OUTPUT
             exit 0
           fi
+          
+          # JIRA_BASE_URL 형식 확인
+          jira_url="${{ secrets.JIRA_BASE_URL }}"
+          if [[ ! "$jira_url" == https://* ]]; then
+            echo "[ERROR] JIRA_BASE_URL should start with https:// (current: $jira_url)"
+            echo "[ERROR] Example: https://your-company.atlassian.net"
+            echo "done_id=" >> $GITHUB_OUTPUT
+            echo "in_progress_id=" >> $GITHUB_OUTPUT
+            echo "review_id=" >> $GITHUB_OUTPUT
+            echo "todo_id=" >> $GITHUB_OUTPUT
+            exit 0
+          fi
 
           # HTTP 상태 코드와 함께 응답 받기
+          echo "[DEBUG] Attempting to call Jira API..."
           response=$(curl -s -w "HTTP_STATUS:%{http_code}" -X GET \
             -H "Authorization: Basic $(echo -n ${{ secrets.JIRA_USER_EMAIL }}:${{ secrets.JIRA_API_TOKEN }} | base64)" \
             -H "Content-Type: application/json" \
-            "${{ secrets.JIRA_BASE_URL }}/rest/api/2/issue/${{ steps.extract.outputs.jira_key }}/transitions" 2>/dev/null || echo "CURL_FAILED")
+            --connect-timeout 30 \
+            --max-time 60 \
+            "${{ secrets.JIRA_BASE_URL }}/rest/api/2/issue/${{ steps.extract.outputs.jira_key }}/transitions" 2>&1)
+
+          # curl 실행 결과 확인
+          curl_exit_code=$?
+          echo "[DEBUG] Curl exit code: $curl_exit_code"
+          echo "[DEBUG] Raw response: $response"
 
           # curl 명령어 자체가 실패한 경우
-          if [ "$response" = "CURL_FAILED" ]; then
-            echo "[ERROR] Failed to connect to Jira API. Check network connectivity and JIRA_BASE_URL"
+          if [ $curl_exit_code -ne 0 ] || [[ "$response" == *"CURL_FAILED"* ]] || [[ "$response" == *"Could not resolve"* ]] || [[ "$response" == *"Failed to connect"* ]]; then
+            echo "[ERROR] Failed to connect to Jira API (curl exit code: $curl_exit_code)"
+            echo "[ERROR] Common causes:"
+            echo "[ERROR] - Invalid JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}"
+            echo "[ERROR] - Network connectivity issues"
+            echo "[ERROR] - DNS resolution failure"
+            echo "[ERROR] - SSL/TLS certificate issues"
+            echo "[ERROR] - Firewall blocking the connection"
             echo "done_id=" >> $GITHUB_OUTPUT
             echo "in_progress_id=" >> $GITHUB_OUTPUT
             echo "review_id=" >> $GITHUB_OUTPUT
