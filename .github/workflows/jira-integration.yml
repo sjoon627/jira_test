@@ -56,8 +56,8 @@ jobs:
           summary: ${{ github.event.issue.title }}
           # [수정] 이전 단계에서 조합한 설명 사용
           description: ${{ steps.prep_description.outputs.description }}
-          # [추가] 에픽 번호가 입력되었을 경우에만 부모로 설정
-          parent: ${{ github.event.inputs.epic_number }}
+          # epic_number를 parent 필드로 전달 (항상 전달, 값이 없으면 빈 값)
+          fields: '{"parent": {"key": "${{ github.event.inputs.epic_number }}"}}'
 
       # 4. [신규] 생성된 Jira 키로 GitHub 이슈 제목 업데이트
       - name: Update GitHub Issue Title
