@@ -4,7 +4,6 @@ on:
   issues:
     types: [opened]
 
-# [추가됨] 워크플로우가 이슈를 수정하고 브랜치를 생성할 수 있도록 권한을 부여합니다.
 permissions:
   issues: write
   contents: write
@@ -13,16 +12,52 @@ jobs:
   automation:
     runs-on: ubuntu-latest
     steps:
-      # [디버깅] 입력값 로그 출력
-      - name: Debug Issue Form Inputs
-        run: |
-          echo "issue_type: ${{ github.event.inputs.issue_type }}"
-          echo "epic_number: ${{ github.event.inputs.epic_number }}"
-          echo "issue_label: ${{ github.event.inputs.issue_label }}"
-          echo "branch_name: ${{ github.event.inputs.branch_name }}"
-          echo "issue_description: ${{ github.event.inputs.issue_description }}"
-          echo "task_list: ${{ github.event.inputs.task_list }}"
-      # 1. Jira 로그인
+      # Issue Forms의 데이터를 파싱하여 변수로 저장
+      - name: Parse Issue Form Data
+        id: parse
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issueBody = context.payload.issue.body;
+            console.log("Issue Body:", issueBody);
+
+            // 정규식을 사용하여 각 필드의 값을 추출
+            const parseField = (fieldName) => {
+              const regex = new RegExp(`### ${fieldName}\\s*\\n\\s*(.+?)(?=\\n\\n###|\\n\\n_No response_|$)`, 's');
+              const match = issueBody.match(regex);
+              return match ? match[1].trim() : '';
+            };
+
+            // 각 필드 파싱
+            const issueType = parseField('이슈 유형');
+            const epicNumber = parseField('상위 에픽 이슈 키');
+            const issueLabel = parseField('GitHub 레이블 추가');
+            const branchName = parseField('브랜치명');
+            const issueDescription = parseField('이슈 상세 설명');
+
+            // 작업 목록 파싱 (체크박스)
+            const taskListRegex = /### 작업 목록 \(체크리스트\)\s*\n((?:- \[.\].+\n?)+)/;
+            const taskListMatch = issueBody.match(taskListRegex);
+            const taskList = taskListMatch ? taskListMatch[1].trim() : '';
+
+            // 출력 설정
+            core.setOutput('issue_type', issueType);
+            core.setOutput('epic_number', epicNumber);
+            core.setOutput('issue_label', issueLabel);
+            core.setOutput('branch_name', branchName);
+            core.setOutput('issue_description', issueDescription);
+            core.setOutput('task_list', taskList);
+
+            // 디버깅용 로그
+            console.log('Parsed values:');
+            console.log('issue_type:', issueType);
+            console.log('epic_number:', epicNumber);
+            console.log('issue_label:', issueLabel);
+            console.log('branch_name:', branchName);
+            console.log('issue_description:', issueDescription);
+            console.log('task_list:', taskList);
+
+      # Jira 로그인
       - name: Login to Jira
         uses: atlassian/gajira-login@v3
         env:
@@ -30,45 +65,42 @@ jobs:
           JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
           JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
 
-      # 2. Jira 이슈 생성을 위한 설명(description) 조합
+      # Jira 이슈 생성을 위한 설명 조합
       - name: Prepare Jira Description
         id: prep_description
         run: |
-          # 체크박스 목록을 마크다운 형식으로 변환합니다.
-          tasks=$(echo "${{ github.event.inputs.task_list }}" | sed 's/^/- [ ] /' | sed 's/$/\\n/')
-          # 최종 설명을 조합합니다.
+          # 작업 목록을 Jira 형식으로 변환
+          tasks="${{ steps.parse.outputs.task_list }}"
+
+          # 최종 설명 조합
           description=$(cat <<EOF
-          ${{ github.event.inputs.issue_description }}
+          ${{ steps.parse.outputs.issue_description }}
 
           ---
-          ### 작업 목록
+          h3. 작업 목록
           $tasks
 
           ---
-          *Original GitHub Issue:* ${{ github.event.issue.html_url }}
+          _Original GitHub Issue:_ ${{ github.event.issue.html_url }}
           EOF
           )
-          # 줄바꿈 문자를 이스케이프하여 한 줄로 만듭니다. (중요)
+
           echo "description<<EOF" >> $GITHUB_OUTPUT
           echo "$description" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-      # 3. Jira 이슈 생성
+      # Jira 이슈 생성
       - name: Create Jira Issue
         id: create_jira
         uses: atlassian/gajira-create@v3
         with:
-          # [수정] project 키는 본인 환경에 맞게 변경
           project: TEST1
-          # [수정] 템플릿의 dropdown에서 선택한 값 사용
-          issuetype: ${{ github.event.inputs.issue_type }}
+          issuetype: ${{ steps.parse.outputs.issue_type }}
           summary: ${{ github.event.issue.title }}
-          # [수정] 이전 단계에서 조합한 설명 사용
           description: ${{ steps.prep_description.outputs.description }}
-          # epic_number를 parent 필드로 전달 (항상 전달, 값이 없으면 빈 값)
-          fields: '{"parent": {"key": "${{ github.event.inputs.epic_number }}"}}'
+          fields: ${{ steps.parse.outputs.epic_number && format('{"parent":{"key":"{0}"}}', steps.parse.outputs.epic_number) || '{}' }}
 
-      # 4. [신규] 생성된 Jira 키로 GitHub 이슈 제목 업데이트
+      # 생성된 Jira 키로 GitHub 이슈 제목 업데이트
       - name: Update GitHub Issue Title
         if: steps.create_jira.outputs.issue
         uses: actions/github-script@v7
@@ -81,29 +113,34 @@ jobs:
               title: `[${{ steps.create_jira.outputs.issue }}] ${{ github.event.issue.title }}`
             })
 
-      # 5. [신규] 입력된 GitHub 레이블 추가
+      # 입력된 GitHub 레이블 추가
       - name: Add GitHub Labels
-        if: github.event.inputs.issue_label
+        if: steps.parse.outputs.issue_label
         uses: actions/github-script@v7
         with:
           script: |
-            const labels = `${{ github.event.inputs.issue_label }}`.split('\n');
-            github.rest.issues.addLabels({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              labels: labels
-            });
+            const labelString = '${{ steps.parse.outputs.issue_label }}';
+            if (labelString && labelString !== '_No response_') {
+              const labels = labelString.split(',').map(l => l.trim()).filter(l => l);
+              if (labels.length > 0) {
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  labels: labels
+                });
+              }
+            }
 
-      # 6. [신규] 브랜치 자동 생성
+      # 브랜치 자동 생성
       - name: Checkout repository
-        if: github.event.inputs.branch_name
+        if: steps.parse.outputs.branch_name && steps.parse.outputs.branch_name != '_No response_'
         uses: actions/checkout@v4
 
       - name: Create Branch
-        if: github.event.inputs.branch_name
+        if: steps.parse.outputs.branch_name && steps.parse.outputs.branch_name != '_No response_'
         run: |
-          BRANCH_NAME="${{ github.event.inputs.branch_name }}"
+          BRANCH_NAME="${{ steps.parse.outputs.branch_name }}"
           git checkout -b "$BRANCH_NAME"
           git push origin "$BRANCH_NAME"
           echo "Branch '$BRANCH_NAME' created and pushed."

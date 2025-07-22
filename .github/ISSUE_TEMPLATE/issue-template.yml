@@ -17,7 +17,6 @@ body:
         - 스토리
         - 에픽
         - 하위 작업
-      default: 0
     validations:
       required: true
 
