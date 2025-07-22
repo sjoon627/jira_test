@@ -37,23 +37,44 @@ jobs:
       - name: Get Available Transitions
         if: steps.extract.outputs.jira_key
         id: transitions
+        continue-on-error: true
         run: |
           echo "[DEBUG] Input Jira Key: ${{ steps.extract.outputs.jira_key }}"
           echo "[DEBUG] Jira Base URL: ${{ secrets.JIRA_BASE_URL }}"
-          
+
+          # Jira API 설정 확인
+          if [ -z "${{ secrets.JIRA_BASE_URL }}" ] || [ -z "${{ secrets.JIRA_USER_EMAIL }}" ] || [ -z "${{ secrets.JIRA_API_TOKEN }}" ]; then
+            echo "[ERROR] Missing Jira configuration. Please check secrets: JIRA_BASE_URL, JIRA_USER_EMAIL, JIRA_API_TOKEN"
+            echo "done_id=" >> $GITHUB_OUTPUT
+            echo "in_progress_id=" >> $GITHUB_OUTPUT
+            echo "review_id=" >> $GITHUB_OUTPUT
+            echo "todo_id=" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
           # HTTP 상태 코드와 함께 응답 받기
           response=$(curl -s -w "HTTP_STATUS:%{http_code}" -X GET \
             -H "Authorization: Basic $(echo -n ${{ secrets.JIRA_USER_EMAIL }}:${{ secrets.JIRA_API_TOKEN }} | base64)" \
             -H "Content-Type: application/json" \
-            "${{ secrets.JIRA_BASE_URL }}/rest/api/2/issue/${{ steps.extract.outputs.jira_key }}/transitions")
+            "${{ secrets.JIRA_BASE_URL }}/rest/api/2/issue/${{ steps.extract.outputs.jira_key }}/transitions" 2>/dev/null || echo "CURL_FAILED")
+
+          # curl 명령어 자체가 실패한 경우
+          if [ "$response" = "CURL_FAILED" ]; then
+            echo "[ERROR] Failed to connect to Jira API. Check network connectivity and JIRA_BASE_URL"
+            echo "done_id=" >> $GITHUB_OUTPUT
+            echo "in_progress_id=" >> $GITHUB_OUTPUT
+            echo "review_id=" >> $GITHUB_OUTPUT
+            echo "todo_id=" >> $GITHUB_OUTPUT
+            exit 0
+          fi
 
           # HTTP 상태 코드와 응답 본문 분리
           http_status=$(echo "$response" | grep -o "HTTP_STATUS:[0-9]*" | cut -d: -f2)
           response_body=$(echo "$response" | sed 's/HTTP_STATUS:[0-9]*$//')
-          
+
           echo "[DEBUG] HTTP Status: $http_status"
           echo "[DEBUG] Raw transitions response: $response_body"
-          
+
           # HTTP 상태 코드 체크
           if [ "$http_status" != "200" ]; then
             echo "[ERROR] Jira API call failed with status $http_status"
@@ -65,9 +86,14 @@ jobs:
             elif [ "$http_status" = "403" ]; then
               echo "[ERROR] Permission denied. Check if the user has access to this issue"
             fi
-            exit 1
+            # 빈 값으로 설정하고 계속 진행
+            echo "done_id=" >> $GITHUB_OUTPUT
+            echo "in_progress_id=" >> $GITHUB_OUTPUT
+            echo "review_id=" >> $GITHUB_OUTPUT
+            echo "todo_id=" >> $GITHUB_OUTPUT
+            exit 0
           fi
-          
+
           echo "Available transitions:"
           echo "$response_body" | jq '.transitions[] | {id: .id, name: .name}'
 
@@ -89,49 +115,59 @@ jobs:
 
       - name: Update Jira Status - Issue Closed
         if: github.event.action == 'closed' && github.event.issue && steps.extract.outputs.jira_key && steps.transitions.outputs.done_id
+        continue-on-error: true
         run: |
+          echo "[DEBUG] Updating Jira status to Done for issue: ${{ steps.extract.outputs.jira_key }}"
           curl -X POST \
             -H "Authorization: Basic $(echo -n ${{ secrets.JIRA_USER_EMAIL }}:${{ secrets.JIRA_API_TOKEN }} | base64)" \
             -H "Content-Type: application/json" \
             -d '{"transition": {"id": "${{ steps.transitions.outputs.done_id }}"}}' \
-            "${{ secrets.JIRA_BASE_URL }}/rest/api/2/issue/${{ steps.extract.outputs.jira_key }}/transitions"
+            "${{ secrets.JIRA_BASE_URL }}/rest/api/2/issue/${{ steps.extract.outputs.jira_key }}/transitions" || echo "[ERROR] Failed to update Jira status"
 
       - name: Update Jira Status - Issue Reopened
         if: github.event.action == 'reopened' && steps.extract.outputs.jira_key && steps.transitions.outputs.todo_id
+        continue-on-error: true
         run: |
+          echo "[DEBUG] Updating Jira status to To Do for issue: ${{ steps.extract.outputs.jira_key }}"
           curl -X POST \
             -H "Authorization: Basic $(echo -n ${{ secrets.JIRA_USER_EMAIL }}:${{ secrets.JIRA_API_TOKEN }} | base64)" \
             -H "Content-Type: application/json" \
             -d '{"transition": {"id": "${{ steps.transitions.outputs.todo_id }}"}}' \
-            "${{ secrets.JIRA_BASE_URL }}/rest/api/2/issue/${{ steps.extract.outputs.jira_key }}/transitions"
+            "${{ secrets.JIRA_BASE_URL }}/rest/api/2/issue/${{ steps.extract.outputs.jira_key }}/transitions" || echo "[ERROR] Failed to update Jira status"
 
       - name: Update Jira Status - PR Opened
         if: github.event.action == 'opened' && github.event.pull_request && steps.extract.outputs.jira_key && steps.transitions.outputs.review_id
+        continue-on-error: true
         run: |
+          echo "[DEBUG] Updating Jira status to In Review for issue: ${{ steps.extract.outputs.jira_key }}"
           curl -X POST \
             -H "Authorization: Basic $(echo -n ${{ secrets.JIRA_USER_EMAIL }}:${{ secrets.JIRA_API_TOKEN }} | base64)" \
             -H "Content-Type: application/json" \
             -d '{"transition": {"id": "${{ steps.transitions.outputs.review_id }}"}}' \
-            "${{ secrets.JIRA_BASE_URL }}/rest/api/2/issue/${{ steps.extract.outputs.jira_key }}/transitions"
+            "${{ secrets.JIRA_BASE_URL }}/rest/api/2/issue/${{ steps.extract.outputs.jira_key }}/transitions" || echo "[ERROR] Failed to update Jira status"
 
       - name: Update Jira Status - PR Merged
         if: github.event.pull_request.merged == true && steps.extract.outputs.jira_key && steps.transitions.outputs.done_id
+        continue-on-error: true
         run: |
+          echo "[DEBUG] Updating Jira status to Done for issue: ${{ steps.extract.outputs.jira_key }}"
           curl -X POST \
             -H "Authorization: Basic $(echo -n ${{ secrets.JIRA_USER_EMAIL }}:${{ secrets.JIRA_API_TOKEN }} | base64)" \
             -H "Content-Type: application/json" \
             -d '{"transition": {"id": "${{ steps.transitions.outputs.done_id }}"}}' \
-            "${{ secrets.JIRA_BASE_URL }}/rest/api/2/issue/${{ steps.extract.outputs.jira_key }}/transitions"
+            "${{ secrets.JIRA_BASE_URL }}/rest/api/2/issue/${{ steps.extract.outputs.jira_key }}/transitions" || echo "[ERROR] Failed to update Jira status"
 
       # 디버깅용 - 전환 실패 시 로그 출력
       - name: Debug - Show Current Issue Status
         if: always() && steps.extract.outputs.jira_key
+        continue-on-error: true
         run: |
           jira_key="${{ steps.extract.outputs.jira_key }}"
           jira_url="${{ secrets.JIRA_BASE_URL }}"
           auth_header="Authorization: Basic $(echo -n ${{ secrets.JIRA_USER_EMAIL }}:${{ secrets.JIRA_API_TOKEN }} | base64)"
 
+          echo "[DEBUG] Checking current Jira status for $jira_key"
           curl -s -X GET \
             -H "$auth_header" \
             "$jira_url/rest/api/2/issue/$jira_key?fields=status" | \
-            jq '.fields.status'
+            jq '.fields.status' || echo "[ERROR] Failed to get issue status"
