@@ -21,8 +21,13 @@ jobs:
         id: extract
         run: |
           title="${{ github.event.issue.title || github.event.pull_request.title }}"
+          echo "[DEBUG] Issue/PR Title: $title"
           if [[ "$title" =~ \[([A-Z]+-[0-9]+)\] ]]; then
+            echo "[DEBUG] Extracted Jira Key: ${BASH_REMATCH[1]}"
             echo "jira_key=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
+          else
+            echo "[DEBUG] Jira Key not found in title"
+            echo "jira_key=" >> $GITHUB_OUTPUT
           fi
 
       # Jira 전환(transition) 확인을 위한 API 호출
@@ -30,11 +35,13 @@ jobs:
         if: steps.extract.outputs.jira_key
         id: transitions
         run: |
+          echo "[DEBUG] Input Jira Key: ${{ steps.extract.outputs.jira_key }}"
           response=$(curl -s -X GET \
             -H "Authorization: Basic $(echo -n ${{ secrets.JIRA_USER_EMAIL }}:${{ secrets.JIRA_API_TOKEN }} | base64)" \
             -H "Content-Type: application/json" \
             "${{ secrets.JIRA_BASE_URL }}/rest/api/2/issue/${{ steps.extract.outputs.jira_key }}/transitions")
 
+          echo "[DEBUG] Raw transitions response: $response"
           echo "Available transitions:"
           echo "$response" | jq '.transitions[] | {id: .id, name: .name}'
 
@@ -43,6 +50,11 @@ jobs:
           in_progress_id=$(echo "$response" | jq -r '.transitions[] | select(.name | test("In Progress|진행 중|진행중"; "i")) | .id' | head -1)
           review_id=$(echo "$response" | jq -r '.transitions[] | select(.name | test("In Review|Review|검토|리뷰"; "i")) | .id' | head -1)
           todo_id=$(echo "$response" | jq -r '.transitions[] | select(.name | test("To Do|할 일|대기"; "i")) | .id' | head -1)
+
+          echo "[DEBUG] done_id: $done_id"
+          echo "[DEBUG] in_progress_id: $in_progress_id"
+          echo "[DEBUG] review_id: $review_id"
+          echo "[DEBUG] todo_id: $todo_id"
 
           echo "done_id=$done_id" >> $GITHUB_OUTPUT
           echo "in_progress_id=$in_progress_id" >> $GITHUB_OUTPUT
