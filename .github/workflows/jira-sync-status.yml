@@ -39,20 +39,43 @@ jobs:
         id: transitions
         run: |
           echo "[DEBUG] Input Jira Key: ${{ steps.extract.outputs.jira_key }}"
-          response=$(curl -s -X GET \
+          echo "[DEBUG] Jira Base URL: ${{ secrets.JIRA_BASE_URL }}"
+          
+          # HTTP 상태 코드와 함께 응답 받기
+          response=$(curl -s -w "HTTP_STATUS:%{http_code}" -X GET \
             -H "Authorization: Basic $(echo -n ${{ secrets.JIRA_USER_EMAIL }}:${{ secrets.JIRA_API_TOKEN }} | base64)" \
             -H "Content-Type: application/json" \
             "${{ secrets.JIRA_BASE_URL }}/rest/api/2/issue/${{ steps.extract.outputs.jira_key }}/transitions")
 
-          echo "[DEBUG] Raw transitions response: $response"
+          # HTTP 상태 코드와 응답 본문 분리
+          http_status=$(echo "$response" | grep -o "HTTP_STATUS:[0-9]*" | cut -d: -f2)
+          response_body=$(echo "$response" | sed 's/HTTP_STATUS:[0-9]*$//')
+          
+          echo "[DEBUG] HTTP Status: $http_status"
+          echo "[DEBUG] Raw transitions response: $response_body"
+          
+          # HTTP 상태 코드 체크
+          if [ "$http_status" != "200" ]; then
+            echo "[ERROR] Jira API call failed with status $http_status"
+            echo "[ERROR] Response: $response_body"
+            if [ "$http_status" = "401" ]; then
+              echo "[ERROR] Authentication failed. Check JIRA_USER_EMAIL and JIRA_API_TOKEN"
+            elif [ "$http_status" = "404" ]; then
+              echo "[ERROR] Issue ${{ steps.extract.outputs.jira_key }} not found. Check if the issue exists in Jira"
+            elif [ "$http_status" = "403" ]; then
+              echo "[ERROR] Permission denied. Check if the user has access to this issue"
+            fi
+            exit 1
+          fi
+          
           echo "Available transitions:"
-          echo "$response" | jq '.transitions[] | {id: .id, name: .name}'
+          echo "$response_body" | jq '.transitions[] | {id: .id, name: .name}'
 
           # 일반적인 전환 ID 찾기
-          done_id=$(echo "$response" | jq -r '.transitions[] | select(.name | test("Done|완료|Closed|종료"; "i")) | .id' | head -1)
-          in_progress_id=$(echo "$response" | jq -r '.transitions[] | select(.name | test("In Progress|진행 중|진행중"; "i")) | .id' | head -1)
-          review_id=$(echo "$response" | jq -r '.transitions[] | select(.name | test("In Review|Review|검토|리뷰"; "i")) | .id' | head -1)
-          todo_id=$(echo "$response" | jq -r '.transitions[] | select(.name | test("To Do|할 일|대기"; "i")) | .id' | head -1)
+          done_id=$(echo "$response_body" | jq -r '.transitions[] | select(.name | test("Done|완료|Closed|종료"; "i")) | .id' | head -1)
+          in_progress_id=$(echo "$response_body" | jq -r '.transitions[] | select(.name | test("In Progress|진행 중|진행중"; "i")) | .id' | head -1)
+          review_id=$(echo "$response_body" | jq -r '.transitions[] | select(.name | test("In Review|Review|검토|리뷰"; "i")) | .id' | head -1)
+          todo_id=$(echo "$response_body" | jq -r '.transitions[] | select(.name | test("To Do|할 일|대기"; "i")) | .id' | head -1)
 
           echo "[DEBUG] done_id: $done_id"
           echo "[DEBUG] in_progress_id: $in_progress_id"
