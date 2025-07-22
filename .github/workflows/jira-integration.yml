@@ -50,7 +50,7 @@ jobs:
         uses: atlassian/gajira-create@v3
         with:
           # [수정] project 키는 본인 환경에 맞게 변경
-          project: YOUR_PROJECT_KEY
+          project: TEST1
           # [수정] 템플릿의 dropdown에서 선택한 값 사용
           issuetype: ${{ github.event.inputs.issue_type }}
           summary: ${{ github.event.issue.title }}
