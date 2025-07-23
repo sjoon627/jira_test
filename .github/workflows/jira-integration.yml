@@ -23,7 +23,9 @@ jobs:
 
             // 정규식을 사용하여 각 필드의 값을 추출
             const parseField = (fieldName) => {
-              const regex = new RegExp(`### ${fieldName}\\s*\\n\\s*(.+?)(?=\\n\\n###|\\n\\n_No response_|$)`, 's');
+              // 이스케이프 처리 개선
+              const escapedFieldName = fieldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+              const regex = new RegExp(`### ${escapedFieldName}\\s*\\n+([^#]+?)(?=\\n+###|$)`, 's');
               const match = issueBody.match(regex);
               return match ? match[1].trim() : '';
             };
@@ -36,7 +38,7 @@ jobs:
             const issueDescription = parseField('📝 상세 내용(Description)');
 
             // 작업 목록 파싱 (체크박스)
-            const taskListRegex = /### 작업 목록 \(체크리스트\)\s*\n((?:- \[.\].+\n?)+)/;
+            const taskListRegex = /### ✅ 체크리스트\(Tasks\)\s*\n+((?:- \[.\].+\n?)+)/;
             const taskListMatch = issueBody.match(taskListRegex);
             const taskList = taskListMatch ? taskListMatch[1].trim() : '';
 
