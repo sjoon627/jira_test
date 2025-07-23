@@ -116,4 +116,5 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: `🌿 Branch \`${{ steps.create_branch.outputs.branch_name }}\` has been created.\n\nTo link it in the Development section, create a PR from this
+              body: `🌿 Branch \`${{ steps.create_branch.outputs.branch_name }}\` has been created.\n\nTo link it in the Development section, create a PR from this branch.`
+            });
