@@ -30,10 +30,10 @@ jobs:
 
             // 각 필드 파싱
             const issueType = parseField('이슈 유형');
-            const epicNumber = parseField('상위 에픽 이슈 키');
+            const epicNumber = parseField('🎟️ 상위 작업 (Ticket Number)');
             const issueLabel = parseField('GitHub 레이블 추가');
-            const branchName = parseField('브랜치명');
-            const issueDescription = parseField('이슈 상세 설명');
+            const branchName = parseField('🌳 브랜치명 (Branch)');
+            const issueDescription = parseField('📝 상세 내용(Description)');
 
             // 작업 목록 파싱 (체크박스)
             const taskListRegex = /### 작업 목록 \(체크리스트\)\s*\n((?:- \[.\].+\n?)+)/;
@@ -168,15 +168,15 @@ jobs:
             # 기본: 앞에 이슈 키 추가
             BRANCH_NAME="${ISSUE_KEY}/${RAW_BRANCH_NAME}"
           fi
-          
+
           # Git 설정
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          
+
           git checkout -b "$BRANCH_NAME"
           git push origin "$BRANCH_NAME"
           echo "Branch '$BRANCH_NAME' created and pushed."
-          
+
           # GitHub 출력 변수에 브랜치명 저장
           echo "branch_name=$BRANCH_NAME" >> $GITHUB_OUTPUT
 
@@ -188,7 +188,7 @@ jobs:
           script: |
             const branchName = '${{ steps.create_branch.outputs.branch_name }}';
             const issueNumber = context.issue.number;
-            
+
             // GraphQL을 사용하여 브랜치를 이슈와 연결
             const mutation = `
               mutation($repositoryId: ID!, $issueId: ID!, $ref: String!) {
@@ -204,7 +204,7 @@ jobs:
                 }
               }
             `;
-            
+
             try {
               // Repository ID와 Issue ID 가져오기
               const repoData = await github.rest.repos.get({
