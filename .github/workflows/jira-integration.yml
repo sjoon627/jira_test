@@ -12,54 +12,24 @@ jobs:
   automation:
     runs-on: ubuntu-latest
     steps:
-      # Issue Forms의 데이터를 파싱하여 변수로 저장
       - name: Parse Issue Form Data
         id: parse
         uses: actions/github-script@v7
         with:
           script: |
-            const issueBody = context.payload.issue.body;
-            console.log("Issue Body:", issueBody);
-
-            // 정규식을 사용하여 각 필드의 값을 추출
-            const parseField = (fieldName) => {
-              // 이스케이프 처리 개선
-              const escapedFieldName = fieldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-              const regex = new RegExp(`### ${escapedFieldName}\\s*\\n+([^#]+?)(?=\\n+###|$)`, 's');
-              const match = issueBody.match(regex);
-              return match ? match[1].trim() : '';
+            const body = context.payload.issue.body;
+            const get = (label) => {
+              const m = body.match(new RegExp(`### ${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\n+([^#]+?)(?=\\n+###|$)`, 's'));
+              return m ? m[1].trim() : '';
             };
+            core.setOutput('issue_type', get('이슈 유형'));
+            core.setOutput('epic_number', get('🎟️ 상위 작업 (Ticket Number)'));
+            core.setOutput('issue_label', get('GitHub 레이블 추가'));
+            core.setOutput('branch_name', get('🌳 브랜치명 (Branch)'));
+            core.setOutput('issue_description', get('📝 상세 내용(Description)'));
+            const taskListMatch = body.match(/### ✅ 체크리스트\(Tasks\)\s*\n+((?:- \[.\].+\n?)*)/);
+            core.setOutput('task_list', taskListMatch ? taskListMatch[1].trim() : '');
 
-            // 각 필드 파싱
-            const issueType = parseField('이슈 유형');
-            const epicNumber = parseField('🎟️ 상위 작업 (Ticket Number)');
-            const issueLabel = parseField('GitHub 레이블 추가');
-            const branchName = parseField('🌳 브랜치명 (Branch)');
-            const issueDescription = parseField('📝 상세 내용(Description)');
-
-            // 작업 목록 파싱 (체크박스)
-            const taskListRegex = /### ✅ 체크리스트\(Tasks\)\s*\n+((?:- \[.\].+\n?)+)/;
-            const taskListMatch = issueBody.match(taskListRegex);
-            const taskList = taskListMatch ? taskListMatch[1].trim() : '';
-
-            // 출력 설정
-            core.setOutput('issue_type', issueType);
-            core.setOutput('epic_number', epicNumber);
-            core.setOutput('issue_label', issueLabel);
-            core.setOutput('branch_name', branchName);
-            core.setOutput('issue_description', issueDescription);
-            core.setOutput('task_list', taskList);
-
-            // 디버깅용 로그
-            console.log('Parsed values:');
-            console.log('issue_type:', issueType);
-            console.log('epic_number:', epicNumber);
-            console.log('issue_label:', issueLabel);
-            console.log('branch_name:', branchName);
-            console.log('issue_description:', issueDescription);
-            console.log('task_list:', taskList);
-
-      # Jira 로그인
       - name: Login to Jira
         uses: atlassian/gajira-login@v3
         env:
@@ -67,42 +37,6 @@ jobs:
           JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
           JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
 
-      # Jira 이슈 생성을 위한 설명 조합
-      - name: Prepare Jira Description
-        id: prep_description
-        run: |
-          # 작업 목록을 Jira 형식으로 변환
-          tasks="${{ steps.parse.outputs.task_list }}"
-
-          # 최종 설명 조합
-          description=$(cat <<EOF
-          ${{ steps.parse.outputs.issue_description }}
-
-          ---
-          h3. 작업 목록
-          $tasks
-
-          ---
-          _Original GitHub Issue:_ ${{ github.event.issue.html_url }}
-          EOF
-          )
-
-          echo "description<<EOF" >> $GITHUB_OUTPUT
-          echo "$description" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
-      # Epic 필드 준비
-      - name: Prepare Fields
-        id: prep_fields
-        run: |
-          epic_key="${{ steps.parse.outputs.epic_number }}"
-          if [ -n "$epic_key" ] && [ "$epic_key" != "_No response_" ]; then
-            echo "fields={\"parent\":{\"key\":\"$epic_key\"}}" >> $GITHUB_OUTPUT
-          else
-            echo "fields={}" >> $GITHUB_OUTPUT
-          fi
-
-      # Jira 이슈 생성
       - name: Create Jira Issue
         id: create_jira
         uses: atlassian/gajira-create@v3
@@ -110,10 +44,17 @@ jobs:
           project: TEST1
           issuetype: ${{ steps.parse.outputs.issue_type }}
           summary: ${{ github.event.issue.title }}
-          description: ${{ steps.prep_description.outputs.description }}
-          fields: ${{ steps.prep_fields.outputs.fields }}
+          description: |
+            ${{ steps.parse.outputs.issue_description }}
 
-      # 생성된 Jira 키로 GitHub 이슈 제목 업데이트
+            ---
+            h3. 작업 목록
+            ${{ steps.parse.outputs.task_list }}
+
+            ---
+            _Original GitHub Issue:_ ${{ github.event.issue.html_url }}
+          fields: ${{ steps.parse.outputs.epic_number && steps.parse.outputs.epic_number != '_No response_' && format('{"parent":{{"key":"{0}"}}}', steps.parse.outputs.epic_number) || '{}' }}
+
       - name: Update GitHub Issue Title
         if: steps.create_jira.outputs.issue
         uses: actions/github-script@v7
@@ -124,28 +65,23 @@ jobs:
               repo: context.repo.repo,
               issue_number: context.issue.number,
               title: `[${{ steps.create_jira.outputs.issue }}] ${{ github.event.issue.title }}`
-            })
+            });
 
-      # 입력된 GitHub 레이블 추가
       - name: Add GitHub Labels
-        if: steps.parse.outputs.issue_label
+        if: steps.parse.outputs.issue_label && steps.parse.outputs.issue_label != '_No response_'
         uses: actions/github-script@v7
         with:
           script: |
-            const labelString = '${{ steps.parse.outputs.issue_label }}';
-            if (labelString && labelString !== '_No response_') {
-              const labels = labelString.split(',').map(l => l.trim()).filter(l => l);
-              if (labels.length > 0) {
-                await github.rest.issues.addLabels({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: context.issue.number,
-                  labels: labels
-                });
-              }
+            const labels = '${{ steps.parse.outputs.issue_label }}'.split(',').map(l => l.trim()).filter(Boolean);
+            if (labels.length) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                labels
+              });
             }
 
-      # 브랜치 자동 생성
       - name: Checkout repository
         if: steps.parse.outputs.branch_name && steps.parse.outputs.branch_name != '_No response_'
         uses: actions/checkout@v4
@@ -156,94 +92,28 @@ jobs:
         run: |
           ISSUE_KEY="${{ steps.create_jira.outputs.issue }}"
           RAW_BRANCH_NAME="${{ steps.parse.outputs.branch_name }}"
-          # Jira 키를 브랜치명에 포함 (대괄호 대신 슬래시 사용: feat/TEST1-39/login)
           if [[ "$RAW_BRANCH_NAME" == feat/* ]]; then
-            # feat/login -> feat/TEST1-39/login
-            BRANCH_NAME=$(echo "$RAW_BRANCH_NAME" | sed "s|feat/|feat/$ISSUE_KEY/|")
+            BRANCH_NAME="feat/$ISSUE_KEY/${RAW_BRANCH_NAME#feat/}"
           elif [[ "$RAW_BRANCH_NAME" == fix/* ]]; then
-            # fix/bug -> fix/TEST1-39/bug
-            BRANCH_NAME=$(echo "$RAW_BRANCH_NAME" | sed "s|fix/|fix/$ISSUE_KEY/|")
+            BRANCH_NAME="fix/$ISSUE_KEY/${RAW_BRANCH_NAME#fix/}"
           elif [[ "$RAW_BRANCH_NAME" == chore/* ]]; then
-            # chore/update -> chore/TEST1-39/update
-            BRANCH_NAME=$(echo "$RAW_BRANCH_NAME" | sed "s|chore/|chore/$ISSUE_KEY/|")
+            BRANCH_NAME="chore/$ISSUE_KEY/${RAW_BRANCH_NAME#chore/}"
           else
-            # 기본: 앞에 이슈 키 추가
-            BRANCH_NAME="${ISSUE_KEY}/${RAW_BRANCH_NAME}"
+            BRANCH_NAME="$ISSUE_KEY/$RAW_BRANCH_NAME"
           fi
-
-          # Git 설정
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
           git checkout -b "$BRANCH_NAME"
           git push origin "$BRANCH_NAME"
-          echo "Branch '$BRANCH_NAME' created and pushed."
-
-          # GitHub 출력 변수에 브랜치명 저장
           echo "branch_name=$BRANCH_NAME" >> $GITHUB_OUTPUT
 
-      # Development 섹션에 브랜치 연결
-      - name: Link Branch to Issue Development
+      - name: Comment Branch Info
         if: steps.create_branch.outputs.branch_name
         uses: actions/github-script@v7
         with:
           script: |
-            const branchName = '${{ steps.create_branch.outputs.branch_name }}';
-            const issueNumber = context.issue.number;
-
-            // GraphQL을 사용하여 브랜치를 이슈와 연결
-            const mutation = `
-              mutation($repositoryId: ID!, $issueId: ID!, $ref: String!) {
-                createLinkedBranch(input: {
-                  repositoryId: $repositoryId,
-                  issueId: $issueId,
-                  ref: $ref
-                }) {
-                  linkedBranch {
-                    id
-                    ref
-                  }
-                }
-              }
-            `;
-
-            try {
-              // Repository ID와 Issue ID 가져오기
-              const repoData = await github.rest.repos.get({
-                owner: context.repo.owner,
-                repo: context.repo.repo
-              });
-              
-              const issueData = await github.rest.issues.get({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: issueNumber
-              });
-              
-              // GraphQL 실행
-              const result = await github.graphql(mutation, {
-                repositoryId: repoData.data.node_id,
-                issueId: issueData.data.node_id,
-                ref: branchName
-              });
-              
-              console.log('Branch linked successfully:', result);
-              
-              // 추가로 코멘트 남기기
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: issueNumber,
-                body: `🌿 Development branch \`${branchName}\` has been created and linked to this issue.\n\nYou can see it in the Development section on the right sidebar.`
-              });
-              
-            } catch (error) {
-              console.error('Failed to link branch:', error);
-              // GraphQL이 실패하면 대체 방법으로 PR 없이 브랜치 정보만 코멘트로 남김
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: issueNumber,
-                body: `🌿 Branch \`${branchName}\` has been created.\n\nTo link it to this issue:\n1. Create a PR from this branch\n2. Or manually link it in the Development section`
-              });
-            }
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `🌿 Branch \`${{ steps.create_branch.outputs.branch_name }}\` has been created.\n\nTo link it in the Development section, create a PR from this
